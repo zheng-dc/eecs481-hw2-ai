@@ -1,0 +1,1097 @@
+        -:    0:Source:pngpread.c
+        -:    1:
+        -:    2:/* pngpread.c - read a png file in push mode
+        -:    3: *
+        -:    4: * Last changed in libpng 1.6.32 [August 24, 2017]
+        -:    5: * Copyright (c) 1998-2002,2004,2006-2017 Glenn Randers-Pehrson
+        -:    6: * (Version 0.96 Copyright (c) 1996, 1997 Andreas Dilger)
+        -:    7: * (Version 0.88 Copyright (c) 1995, 1996 Guy Eric Schalnat, Group 42, Inc.)
+        -:    8: *
+        -:    9: * This code is released under the libpng license.
+        -:   10: * For conditions of distribution and use, see the disclaimer
+        -:   11: * and license in png.h
+        -:   12: */
+        -:   13:
+        -:   14:#include "pngpriv.h"
+        -:   15:
+        -:   16:#ifdef PNG_PROGRESSIVE_READ_SUPPORTED
+        -:   17:
+        -:   18:/* Push model modes */
+        -:   19:#define PNG_READ_SIG_MODE   0
+        -:   20:#define PNG_READ_CHUNK_MODE 1
+        -:   21:#define PNG_READ_IDAT_MODE  2
+        -:   22:#define PNG_READ_tEXt_MODE  4
+        -:   23:#define PNG_READ_zTXt_MODE  5
+        -:   24:#define PNG_READ_DONE_MODE  6
+        -:   25:#define PNG_READ_iTXt_MODE  7
+        -:   26:#define PNG_ERROR_MODE      8
+        -:   27:
+        -:   28:#define PNG_PUSH_SAVE_BUFFER_IF_FULL \
+        -:   29:if (png_ptr->push_length + 4 > png_ptr->buffer_size) \
+        -:   30:   { png_push_save_buffer(png_ptr); return; }
+        -:   31:#define PNG_PUSH_SAVE_BUFFER_IF_LT(N) \
+        -:   32:if (png_ptr->buffer_size < N) \
+        -:   33:   { png_push_save_buffer(png_ptr); return; }
+        -:   34:
+        -:   35:void PNGAPI
+    #####:   36:png_process_data(png_structrp png_ptr, png_inforp info_ptr,
+        -:   37:    png_bytep buffer, png_size_t buffer_size)
+        -:   38:{
+    #####:   39:   if (png_ptr == NULL || info_ptr == NULL)
+    #####:   40:      return;
+        -:   41:
+    #####:   42:   png_push_restore_buffer(png_ptr, buffer, buffer_size);
+        -:   43:
+    #####:   44:   while (png_ptr->buffer_size)
+        -:   45:   {
+    #####:   46:      png_process_some_data(png_ptr, info_ptr);
+        -:   47:   }
+        -:   48:}
+        -:   49:
+        -:   50:png_size_t PNGAPI
+    #####:   51:png_process_data_pause(png_structrp png_ptr, int save)
+        -:   52:{
+    #####:   53:   if (png_ptr != NULL)
+        -:   54:   {
+        -:   55:      /* It's easiest for the caller if we do the save; then the caller doesn't
+        -:   56:       * have to supply the same data again:
+        -:   57:       */
+    #####:   58:      if (save != 0)
+    #####:   59:         png_push_save_buffer(png_ptr);
+        -:   60:      else
+        -:   61:      {
+        -:   62:         /* This includes any pending saved bytes: */
+    #####:   63:         png_size_t remaining = png_ptr->buffer_size;
+    #####:   64:         png_ptr->buffer_size = 0;
+        -:   65:
+        -:   66:         /* So subtract the saved buffer size, unless all the data
+        -:   67:          * is actually 'saved', in which case we just return 0
+        -:   68:          */
+    #####:   69:         if (png_ptr->save_buffer_size < remaining)
+    #####:   70:            return remaining - png_ptr->save_buffer_size;
+        -:   71:      }
+        -:   72:   }
+        -:   73:
+    #####:   74:   return 0;
+        -:   75:}
+        -:   76:
+        -:   77:png_uint_32 PNGAPI
+    #####:   78:png_process_data_skip(png_structrp png_ptr)
+        -:   79:{
+        -:   80:/* TODO: Deprecate and remove this API.
+        -:   81: * Somewhere the implementation of this seems to have been lost,
+        -:   82: * or abandoned.  It was only to support some internal back-door access
+        -:   83: * to png_struct) in libpng-1.4.x.
+        -:   84: */
+    #####:   85:   png_app_warning(png_ptr,
+        -:   86:"png_process_data_skip is not implemented in any current version of libpng");
+    #####:   87:   return 0;
+        -:   88:}
+        -:   89:
+        -:   90:/* What we do with the incoming data depends on what we were previously
+        -:   91: * doing before we ran out of data...
+        -:   92: */
+        -:   93:void /* PRIVATE */
+    #####:   94:png_process_some_data(png_structrp png_ptr, png_inforp info_ptr)
+        -:   95:{
+    #####:   96:   if (png_ptr == NULL)
+    #####:   97:      return;
+        -:   98:
+    #####:   99:   switch (png_ptr->process_mode)
+        -:  100:   {
+    #####:  101:      case PNG_READ_SIG_MODE:
+        -:  102:      {
+    #####:  103:         png_push_read_sig(png_ptr, info_ptr);
+    #####:  104:         break;
+        -:  105:      }
+        -:  106:
+    #####:  107:      case PNG_READ_CHUNK_MODE:
+        -:  108:      {
+    #####:  109:         png_push_read_chunk(png_ptr, info_ptr);
+    #####:  110:         break;
+        -:  111:      }
+        -:  112:
+    #####:  113:      case PNG_READ_IDAT_MODE:
+        -:  114:      {
+    #####:  115:         png_push_read_IDAT(png_ptr);
+    #####:  116:         break;
+        -:  117:      }
+        -:  118:
+    #####:  119:      default:
+        -:  120:      {
+    #####:  121:         png_ptr->buffer_size = 0;
+    #####:  122:         break;
+        -:  123:      }
+        -:  124:   }
+        -:  125:}
+        -:  126:
+        -:  127:/* Read any remaining signature bytes from the stream and compare them with
+        -:  128: * the correct PNG signature.  It is possible that this routine is called
+        -:  129: * with bytes already read from the signature, either because they have been
+        -:  130: * checked by the calling application, or because of multiple calls to this
+        -:  131: * routine.
+        -:  132: */
+        -:  133:void /* PRIVATE */
+    #####:  134:png_push_read_sig(png_structrp png_ptr, png_inforp info_ptr)
+        -:  135:{
+    #####:  136:   png_size_t num_checked = png_ptr->sig_bytes, /* SAFE, does not exceed 8 */
+    #####:  137:       num_to_check = 8 - num_checked;
+        -:  138:
+    #####:  139:   if (png_ptr->buffer_size < num_to_check)
+        -:  140:   {
+    #####:  141:      num_to_check = png_ptr->buffer_size;
+        -:  142:   }
+        -:  143:
+    #####:  144:   png_push_fill_buffer(png_ptr, &(info_ptr->signature[num_checked]),
+        -:  145:       num_to_check);
+    #####:  146:   png_ptr->sig_bytes = (png_byte)(png_ptr->sig_bytes + num_to_check);
+        -:  147:
+    #####:  148:   if (png_sig_cmp(info_ptr->signature, num_checked, num_to_check))
+        -:  149:   {
+    #####:  150:      if (num_checked < 4 &&
+    #####:  151:          png_sig_cmp(info_ptr->signature, num_checked, num_to_check - 4))
+    #####:  152:         png_error(png_ptr, "Not a PNG file");
+        -:  153:
+        -:  154:      else
+    #####:  155:         png_error(png_ptr, "PNG file corrupted by ASCII conversion");
+        -:  156:   }
+        -:  157:   else
+        -:  158:   {
+    #####:  159:      if (png_ptr->sig_bytes >= 8)
+        -:  160:      {
+    #####:  161:         png_ptr->process_mode = PNG_READ_CHUNK_MODE;
+        -:  162:      }
+        -:  163:   }
+    #####:  164:}
+        -:  165:
+        -:  166:void /* PRIVATE */
+    #####:  167:png_push_read_chunk(png_structrp png_ptr, png_inforp info_ptr)
+        -:  168:{
+        -:  169:   png_uint_32 chunk_name;
+        -:  170:#ifdef PNG_HANDLE_AS_UNKNOWN_SUPPORTED
+        -:  171:   int keep; /* unknown handling method */
+        -:  172:#endif
+        -:  173:
+        -:  174:   /* First we make sure we have enough data for the 4-byte chunk name
+        -:  175:    * and the 4-byte chunk length before proceeding with decoding the
+        -:  176:    * chunk data.  To fully decode each of these chunks, we also make
+        -:  177:    * sure we have enough data in the buffer for the 4-byte CRC at the
+        -:  178:    * end of every chunk (except IDAT, which is handled separately).
+        -:  179:    */
+    #####:  180:   if ((png_ptr->mode & PNG_HAVE_CHUNK_HEADER) == 0)
+        -:  181:   {
+        -:  182:      png_byte chunk_length[4];
+        -:  183:      png_byte chunk_tag[4];
+        -:  184:
+    #####:  185:      PNG_PUSH_SAVE_BUFFER_IF_LT(8)
+    #####:  186:      png_push_fill_buffer(png_ptr, chunk_length, 4);
+    #####:  187:      png_ptr->push_length = png_get_uint_31(png_ptr, chunk_length);
+    #####:  188:      png_reset_crc(png_ptr);
+    #####:  189:      png_crc_read(png_ptr, chunk_tag, 4);
+    #####:  190:      png_ptr->chunk_name = PNG_CHUNK_FROM_STRING(chunk_tag);
+    #####:  191:      png_check_chunk_name(png_ptr, png_ptr->chunk_name);
+    #####:  192:      png_check_chunk_length(png_ptr, png_ptr->push_length);
+    #####:  193:      png_ptr->mode |= PNG_HAVE_CHUNK_HEADER;
+        -:  194:   }
+        -:  195:
+    #####:  196:   chunk_name = png_ptr->chunk_name;
+        -:  197:
+    #####:  198:   if (chunk_name == png_IDAT)
+        -:  199:   {
+    #####:  200:      if ((png_ptr->mode & PNG_AFTER_IDAT) != 0)
+    #####:  201:         png_ptr->mode |= PNG_HAVE_CHUNK_AFTER_IDAT;
+        -:  202:
+        -:  203:      /* If we reach an IDAT chunk, this means we have read all of the
+        -:  204:       * header chunks, and we can start reading the image (or if this
+        -:  205:       * is called after the image has been read - we have an error).
+        -:  206:       */
+    #####:  207:      if ((png_ptr->mode & PNG_HAVE_IHDR) == 0)
+    #####:  208:         png_error(png_ptr, "Missing IHDR before IDAT");
+        -:  209:
+    #####:  210:      else if (png_ptr->color_type == PNG_COLOR_TYPE_PALETTE &&
+    #####:  211:          (png_ptr->mode & PNG_HAVE_PLTE) == 0)
+    #####:  212:         png_error(png_ptr, "Missing PLTE before IDAT");
+        -:  213:
+    #####:  214:      png_ptr->process_mode = PNG_READ_IDAT_MODE;
+        -:  215:
+    #####:  216:      if ((png_ptr->mode & PNG_HAVE_IDAT) != 0)
+    #####:  217:         if ((png_ptr->mode & PNG_HAVE_CHUNK_AFTER_IDAT) == 0)
+    #####:  218:            if (png_ptr->push_length == 0)
+    #####:  219:               return;
+        -:  220:
+    #####:  221:      png_ptr->mode |= PNG_HAVE_IDAT;
+        -:  222:
+    #####:  223:      if ((png_ptr->mode & PNG_AFTER_IDAT) != 0)
+    #####:  224:         png_benign_error(png_ptr, "Too many IDATs found");
+        -:  225:   }
+        -:  226:
+    #####:  227:   if (chunk_name == png_IHDR)
+        -:  228:   {
+    #####:  229:      if (png_ptr->push_length != 13)
+    #####:  230:         png_error(png_ptr, "Invalid IHDR length");
+        -:  231:
+    #####:  232:      PNG_PUSH_SAVE_BUFFER_IF_FULL
+    #####:  233:      png_handle_IHDR(png_ptr, info_ptr, png_ptr->push_length);
+        -:  234:   }
+        -:  235:
+    #####:  236:   else if (chunk_name == png_IEND)
+        -:  237:   {
+    #####:  238:      PNG_PUSH_SAVE_BUFFER_IF_FULL
+    #####:  239:      png_handle_IEND(png_ptr, info_ptr, png_ptr->push_length);
+        -:  240:
+    #####:  241:      png_ptr->process_mode = PNG_READ_DONE_MODE;
+    #####:  242:      png_push_have_end(png_ptr, info_ptr);
+        -:  243:   }
+        -:  244:
+        -:  245:#ifdef PNG_HANDLE_AS_UNKNOWN_SUPPORTED
+    #####:  246:   else if ((keep = png_chunk_unknown_handling(png_ptr, chunk_name)) != 0)
+        -:  247:   {
+    #####:  248:      PNG_PUSH_SAVE_BUFFER_IF_FULL
+    #####:  249:      png_handle_unknown(png_ptr, info_ptr, png_ptr->push_length, keep);
+        -:  250:
+    #####:  251:      if (chunk_name == png_PLTE)
+    #####:  252:         png_ptr->mode |= PNG_HAVE_PLTE;
+        -:  253:   }
+        -:  254:#endif
+        -:  255:
+    #####:  256:   else if (chunk_name == png_PLTE)
+        -:  257:   {
+    #####:  258:      PNG_PUSH_SAVE_BUFFER_IF_FULL
+    #####:  259:      png_handle_PLTE(png_ptr, info_ptr, png_ptr->push_length);
+        -:  260:   }
+        -:  261:
+    #####:  262:   else if (chunk_name == png_IDAT)
+        -:  263:   {
+    #####:  264:      png_ptr->idat_size = png_ptr->push_length;
+    #####:  265:      png_ptr->process_mode = PNG_READ_IDAT_MODE;
+    #####:  266:      png_push_have_info(png_ptr, info_ptr);
+    #####:  267:      png_ptr->zstream.avail_out =
+    #####:  268:          (uInt) PNG_ROWBYTES(png_ptr->pixel_depth,
+    #####:  269:          png_ptr->iwidth) + 1;
+    #####:  270:      png_ptr->zstream.next_out = png_ptr->row_buf;
+    #####:  271:      return;
+        -:  272:   }
+        -:  273:
+        -:  274:#ifdef PNG_READ_gAMA_SUPPORTED
+    #####:  275:   else if (png_ptr->chunk_name == png_gAMA)
+        -:  276:   {
+    #####:  277:      PNG_PUSH_SAVE_BUFFER_IF_FULL
+    #####:  278:      png_handle_gAMA(png_ptr, info_ptr, png_ptr->push_length);
+        -:  279:   }
+        -:  280:
+        -:  281:#endif
+        -:  282:#ifdef PNG_READ_sBIT_SUPPORTED
+    #####:  283:   else if (png_ptr->chunk_name == png_sBIT)
+        -:  284:   {
+    #####:  285:      PNG_PUSH_SAVE_BUFFER_IF_FULL
+    #####:  286:      png_handle_sBIT(png_ptr, info_ptr, png_ptr->push_length);
+        -:  287:   }
+        -:  288:
+        -:  289:#endif
+        -:  290:#ifdef PNG_READ_cHRM_SUPPORTED
+    #####:  291:   else if (png_ptr->chunk_name == png_cHRM)
+        -:  292:   {
+    #####:  293:      PNG_PUSH_SAVE_BUFFER_IF_FULL
+    #####:  294:      png_handle_cHRM(png_ptr, info_ptr, png_ptr->push_length);
+        -:  295:   }
+        -:  296:
+        -:  297:#endif
+        -:  298:#ifdef PNG_READ_sRGB_SUPPORTED
+    #####:  299:   else if (chunk_name == png_sRGB)
+        -:  300:   {
+    #####:  301:      PNG_PUSH_SAVE_BUFFER_IF_FULL
+    #####:  302:      png_handle_sRGB(png_ptr, info_ptr, png_ptr->push_length);
+        -:  303:   }
+        -:  304:
+        -:  305:#endif
+        -:  306:#ifdef PNG_READ_iCCP_SUPPORTED
+    #####:  307:   else if (png_ptr->chunk_name == png_iCCP)
+        -:  308:   {
+    #####:  309:      PNG_PUSH_SAVE_BUFFER_IF_FULL
+    #####:  310:      png_handle_iCCP(png_ptr, info_ptr, png_ptr->push_length);
+        -:  311:   }
+        -:  312:
+        -:  313:#endif
+        -:  314:#ifdef PNG_READ_sPLT_SUPPORTED
+    #####:  315:   else if (chunk_name == png_sPLT)
+        -:  316:   {
+    #####:  317:      PNG_PUSH_SAVE_BUFFER_IF_FULL
+    #####:  318:      png_handle_sPLT(png_ptr, info_ptr, png_ptr->push_length);
+        -:  319:   }
+        -:  320:
+        -:  321:#endif
+        -:  322:#ifdef PNG_READ_tRNS_SUPPORTED
+    #####:  323:   else if (chunk_name == png_tRNS)
+        -:  324:   {
+    #####:  325:      PNG_PUSH_SAVE_BUFFER_IF_FULL
+    #####:  326:      png_handle_tRNS(png_ptr, info_ptr, png_ptr->push_length);
+        -:  327:   }
+        -:  328:
+        -:  329:#endif
+        -:  330:#ifdef PNG_READ_bKGD_SUPPORTED
+    #####:  331:   else if (chunk_name == png_bKGD)
+        -:  332:   {
+    #####:  333:      PNG_PUSH_SAVE_BUFFER_IF_FULL
+    #####:  334:      png_handle_bKGD(png_ptr, info_ptr, png_ptr->push_length);
+        -:  335:   }
+        -:  336:
+        -:  337:#endif
+        -:  338:#ifdef PNG_READ_hIST_SUPPORTED
+    #####:  339:   else if (chunk_name == png_hIST)
+        -:  340:   {
+    #####:  341:      PNG_PUSH_SAVE_BUFFER_IF_FULL
+    #####:  342:      png_handle_hIST(png_ptr, info_ptr, png_ptr->push_length);
+        -:  343:   }
+        -:  344:
+        -:  345:#endif
+        -:  346:#ifdef PNG_READ_pHYs_SUPPORTED
+    #####:  347:   else if (chunk_name == png_pHYs)
+        -:  348:   {
+    #####:  349:      PNG_PUSH_SAVE_BUFFER_IF_FULL
+    #####:  350:      png_handle_pHYs(png_ptr, info_ptr, png_ptr->push_length);
+        -:  351:   }
+        -:  352:
+        -:  353:#endif
+        -:  354:#ifdef PNG_READ_oFFs_SUPPORTED
+    #####:  355:   else if (chunk_name == png_oFFs)
+        -:  356:   {
+    #####:  357:      PNG_PUSH_SAVE_BUFFER_IF_FULL
+    #####:  358:      png_handle_oFFs(png_ptr, info_ptr, png_ptr->push_length);
+        -:  359:   }
+        -:  360:#endif
+        -:  361:
+        -:  362:#ifdef PNG_READ_pCAL_SUPPORTED
+    #####:  363:   else if (chunk_name == png_pCAL)
+        -:  364:   {
+    #####:  365:      PNG_PUSH_SAVE_BUFFER_IF_FULL
+    #####:  366:      png_handle_pCAL(png_ptr, info_ptr, png_ptr->push_length);
+        -:  367:   }
+        -:  368:
+        -:  369:#endif
+        -:  370:#ifdef PNG_READ_sCAL_SUPPORTED
+    #####:  371:   else if (chunk_name == png_sCAL)
+        -:  372:   {
+    #####:  373:      PNG_PUSH_SAVE_BUFFER_IF_FULL
+    #####:  374:      png_handle_sCAL(png_ptr, info_ptr, png_ptr->push_length);
+        -:  375:   }
+        -:  376:
+        -:  377:#endif
+        -:  378:#ifdef PNG_READ_tIME_SUPPORTED
+    #####:  379:   else if (chunk_name == png_tIME)
+        -:  380:   {
+    #####:  381:      PNG_PUSH_SAVE_BUFFER_IF_FULL
+    #####:  382:      png_handle_tIME(png_ptr, info_ptr, png_ptr->push_length);
+        -:  383:   }
+        -:  384:
+        -:  385:#endif
+        -:  386:#ifdef PNG_READ_tEXt_SUPPORTED
+    #####:  387:   else if (chunk_name == png_tEXt)
+        -:  388:   {
+    #####:  389:      PNG_PUSH_SAVE_BUFFER_IF_FULL
+    #####:  390:      png_handle_tEXt(png_ptr, info_ptr, png_ptr->push_length);
+        -:  391:   }
+        -:  392:
+        -:  393:#endif
+        -:  394:#ifdef PNG_READ_zTXt_SUPPORTED
+    #####:  395:   else if (chunk_name == png_zTXt)
+        -:  396:   {
+    #####:  397:      PNG_PUSH_SAVE_BUFFER_IF_FULL
+    #####:  398:      png_handle_zTXt(png_ptr, info_ptr, png_ptr->push_length);
+        -:  399:   }
+        -:  400:
+        -:  401:#endif
+        -:  402:#ifdef PNG_READ_iTXt_SUPPORTED
+    #####:  403:   else if (chunk_name == png_iTXt)
+        -:  404:   {
+    #####:  405:      PNG_PUSH_SAVE_BUFFER_IF_FULL
+    #####:  406:      png_handle_iTXt(png_ptr, info_ptr, png_ptr->push_length);
+        -:  407:   }
+        -:  408:#endif
+        -:  409:
+        -:  410:   else
+        -:  411:   {
+    #####:  412:      PNG_PUSH_SAVE_BUFFER_IF_FULL
+    #####:  413:      png_handle_unknown(png_ptr, info_ptr, png_ptr->push_length,
+        -:  414:          PNG_HANDLE_CHUNK_AS_DEFAULT);
+        -:  415:   }
+        -:  416:
+    #####:  417:   png_ptr->mode &= ~PNG_HAVE_CHUNK_HEADER;
+        -:  418:}
+        -:  419:
+        -:  420:void PNGCBAPI
+    #####:  421:png_push_fill_buffer(png_structp png_ptr, png_bytep buffer, png_size_t length)
+        -:  422:{
+        -:  423:   png_bytep ptr;
+        -:  424:
+    #####:  425:   if (png_ptr == NULL)
+    #####:  426:      return;
+        -:  427:
+    #####:  428:   ptr = buffer;
+    #####:  429:   if (png_ptr->save_buffer_size != 0)
+        -:  430:   {
+        -:  431:      png_size_t save_size;
+        -:  432:
+    #####:  433:      if (length < png_ptr->save_buffer_size)
+    #####:  434:         save_size = length;
+        -:  435:
+        -:  436:      else
+    #####:  437:         save_size = png_ptr->save_buffer_size;
+        -:  438:
+    #####:  439:      memcpy(ptr, png_ptr->save_buffer_ptr, save_size);
+    #####:  440:      length -= save_size;
+    #####:  441:      ptr += save_size;
+    #####:  442:      png_ptr->buffer_size -= save_size;
+    #####:  443:      png_ptr->save_buffer_size -= save_size;
+    #####:  444:      png_ptr->save_buffer_ptr += save_size;
+        -:  445:   }
+    #####:  446:   if (length != 0 && png_ptr->current_buffer_size != 0)
+        -:  447:   {
+        -:  448:      png_size_t save_size;
+        -:  449:
+    #####:  450:      if (length < png_ptr->current_buffer_size)
+    #####:  451:         save_size = length;
+        -:  452:
+        -:  453:      else
+    #####:  454:         save_size = png_ptr->current_buffer_size;
+        -:  455:
+    #####:  456:      memcpy(ptr, png_ptr->current_buffer_ptr, save_size);
+    #####:  457:      png_ptr->buffer_size -= save_size;
+    #####:  458:      png_ptr->current_buffer_size -= save_size;
+    #####:  459:      png_ptr->current_buffer_ptr += save_size;
+        -:  460:   }
+        -:  461:}
+        -:  462:
+        -:  463:void /* PRIVATE */
+    #####:  464:png_push_save_buffer(png_structrp png_ptr)
+        -:  465:{
+    #####:  466:   if (png_ptr->save_buffer_size != 0)
+        -:  467:   {
+    #####:  468:      if (png_ptr->save_buffer_ptr != png_ptr->save_buffer)
+        -:  469:      {
+        -:  470:         png_size_t i, istop;
+        -:  471:         png_bytep sp;
+        -:  472:         png_bytep dp;
+        -:  473:
+    #####:  474:         istop = png_ptr->save_buffer_size;
+    #####:  475:         for (i = 0, sp = png_ptr->save_buffer_ptr, dp = png_ptr->save_buffer;
+    #####:  476:             i < istop; i++, sp++, dp++)
+        -:  477:         {
+    #####:  478:            *dp = *sp;
+        -:  479:         }
+        -:  480:      }
+        -:  481:   }
+    #####:  482:   if (png_ptr->save_buffer_size + png_ptr->current_buffer_size >
+    #####:  483:       png_ptr->save_buffer_max)
+        -:  484:   {
+        -:  485:      png_size_t new_max;
+        -:  486:      png_bytep old_buffer;
+        -:  487:
+    #####:  488:      if (png_ptr->save_buffer_size > PNG_SIZE_MAX -
+    #####:  489:          (png_ptr->current_buffer_size + 256))
+        -:  490:      {
+    #####:  491:         png_error(png_ptr, "Potential overflow of save_buffer");
+        -:  492:      }
+        -:  493:
+    #####:  494:      new_max = png_ptr->save_buffer_size + png_ptr->current_buffer_size + 256;
+    #####:  495:      old_buffer = png_ptr->save_buffer;
+    #####:  496:      png_ptr->save_buffer = (png_bytep)png_malloc_warn(png_ptr,
+        -:  497:          (png_size_t)new_max);
+        -:  498:
+    #####:  499:      if (png_ptr->save_buffer == NULL)
+        -:  500:      {
+    #####:  501:         png_free(png_ptr, old_buffer);
+    #####:  502:         png_error(png_ptr, "Insufficient memory for save_buffer");
+        -:  503:      }
+        -:  504:
+    #####:  505:      if (old_buffer)
+    #####:  506:         memcpy(png_ptr->save_buffer, old_buffer, png_ptr->save_buffer_size);
+    #####:  507:      else if (png_ptr->save_buffer_size)
+    #####:  508:         png_error(png_ptr, "save_buffer error");
+    #####:  509:      png_free(png_ptr, old_buffer);
+    #####:  510:      png_ptr->save_buffer_max = new_max;
+        -:  511:   }
+    #####:  512:   if (png_ptr->current_buffer_size)
+        -:  513:   {
+    #####:  514:      memcpy(png_ptr->save_buffer + png_ptr->save_buffer_size,
+    #####:  515:         png_ptr->current_buffer_ptr, png_ptr->current_buffer_size);
+    #####:  516:      png_ptr->save_buffer_size += png_ptr->current_buffer_size;
+    #####:  517:      png_ptr->current_buffer_size = 0;
+        -:  518:   }
+    #####:  519:   png_ptr->save_buffer_ptr = png_ptr->save_buffer;
+    #####:  520:   png_ptr->buffer_size = 0;
+    #####:  521:}
+        -:  522:
+        -:  523:void /* PRIVATE */
+    #####:  524:png_push_restore_buffer(png_structrp png_ptr, png_bytep buffer,
+        -:  525:    png_size_t buffer_length)
+        -:  526:{
+    #####:  527:   png_ptr->current_buffer = buffer;
+    #####:  528:   png_ptr->current_buffer_size = buffer_length;
+    #####:  529:   png_ptr->buffer_size = buffer_length + png_ptr->save_buffer_size;
+    #####:  530:   png_ptr->current_buffer_ptr = png_ptr->current_buffer;
+    #####:  531:}
+        -:  532:
+        -:  533:void /* PRIVATE */
+    #####:  534:png_push_read_IDAT(png_structrp png_ptr)
+        -:  535:{
+    #####:  536:   if ((png_ptr->mode & PNG_HAVE_CHUNK_HEADER) == 0)
+        -:  537:   {
+        -:  538:      png_byte chunk_length[4];
+        -:  539:      png_byte chunk_tag[4];
+        -:  540:
+        -:  541:      /* TODO: this code can be commoned up with the same code in push_read */
+    #####:  542:      PNG_PUSH_SAVE_BUFFER_IF_LT(8)
+    #####:  543:      png_push_fill_buffer(png_ptr, chunk_length, 4);
+    #####:  544:      png_ptr->push_length = png_get_uint_31(png_ptr, chunk_length);
+    #####:  545:      png_reset_crc(png_ptr);
+    #####:  546:      png_crc_read(png_ptr, chunk_tag, 4);
+    #####:  547:      png_ptr->chunk_name = PNG_CHUNK_FROM_STRING(chunk_tag);
+    #####:  548:      png_ptr->mode |= PNG_HAVE_CHUNK_HEADER;
+        -:  549:
+    #####:  550:      if (png_ptr->chunk_name != png_IDAT)
+        -:  551:      {
+    #####:  552:         png_ptr->process_mode = PNG_READ_CHUNK_MODE;
+        -:  553:
+    #####:  554:         if ((png_ptr->flags & PNG_FLAG_ZSTREAM_ENDED) == 0)
+    #####:  555:            png_error(png_ptr, "Not enough compressed data");
+        -:  556:
+    #####:  557:         return;
+        -:  558:      }
+        -:  559:
+    #####:  560:      png_ptr->idat_size = png_ptr->push_length;
+        -:  561:   }
+        -:  562:
+    #####:  563:   if (png_ptr->idat_size != 0 && png_ptr->save_buffer_size != 0)
+        -:  564:   {
+    #####:  565:      png_size_t save_size = png_ptr->save_buffer_size;
+    #####:  566:      png_uint_32 idat_size = png_ptr->idat_size;
+        -:  567:
+        -:  568:      /* We want the smaller of 'idat_size' and 'current_buffer_size', but they
+        -:  569:       * are of different types and we don't know which variable has the fewest
+        -:  570:       * bits.  Carefully select the smaller and cast it to the type of the
+        -:  571:       * larger - this cannot overflow.  Do not cast in the following test - it
+        -:  572:       * will break on either 16-bit or 64-bit platforms.
+        -:  573:       */
+    #####:  574:      if (idat_size < save_size)
+    #####:  575:         save_size = (png_size_t)idat_size;
+        -:  576:
+        -:  577:      else
+    #####:  578:         idat_size = (png_uint_32)save_size;
+        -:  579:
+    #####:  580:      png_calculate_crc(png_ptr, png_ptr->save_buffer_ptr, save_size);
+        -:  581:
+    #####:  582:      png_process_IDAT_data(png_ptr, png_ptr->save_buffer_ptr, save_size);
+        -:  583:
+    #####:  584:      png_ptr->idat_size -= idat_size;
+    #####:  585:      png_ptr->buffer_size -= save_size;
+    #####:  586:      png_ptr->save_buffer_size -= save_size;
+    #####:  587:      png_ptr->save_buffer_ptr += save_size;
+        -:  588:   }
+        -:  589:
+    #####:  590:   if (png_ptr->idat_size != 0 && png_ptr->current_buffer_size != 0)
+        -:  591:   {
+    #####:  592:      png_size_t save_size = png_ptr->current_buffer_size;
+    #####:  593:      png_uint_32 idat_size = png_ptr->idat_size;
+        -:  594:
+        -:  595:      /* We want the smaller of 'idat_size' and 'current_buffer_size', but they
+        -:  596:       * are of different types and we don't know which variable has the fewest
+        -:  597:       * bits.  Carefully select the smaller and cast it to the type of the
+        -:  598:       * larger - this cannot overflow.
+        -:  599:       */
+    #####:  600:      if (idat_size < save_size)
+    #####:  601:         save_size = (png_size_t)idat_size;
+        -:  602:
+        -:  603:      else
+    #####:  604:         idat_size = (png_uint_32)save_size;
+        -:  605:
+    #####:  606:      png_calculate_crc(png_ptr, png_ptr->current_buffer_ptr, save_size);
+        -:  607:
+    #####:  608:      png_process_IDAT_data(png_ptr, png_ptr->current_buffer_ptr, save_size);
+        -:  609:
+    #####:  610:      png_ptr->idat_size -= idat_size;
+    #####:  611:      png_ptr->buffer_size -= save_size;
+    #####:  612:      png_ptr->current_buffer_size -= save_size;
+    #####:  613:      png_ptr->current_buffer_ptr += save_size;
+        -:  614:   }
+        -:  615:
+    #####:  616:   if (png_ptr->idat_size == 0)
+        -:  617:   {
+    #####:  618:      PNG_PUSH_SAVE_BUFFER_IF_LT(4)
+    #####:  619:      png_crc_finish(png_ptr, 0);
+    #####:  620:      png_ptr->mode &= ~PNG_HAVE_CHUNK_HEADER;
+    #####:  621:      png_ptr->mode |= PNG_AFTER_IDAT;
+    #####:  622:      png_ptr->zowner = 0;
+        -:  623:   }
+        -:  624:}
+        -:  625:
+        -:  626:void /* PRIVATE */
+    #####:  627:png_process_IDAT_data(png_structrp png_ptr, png_bytep buffer,
+        -:  628:    png_size_t buffer_length)
+        -:  629:{
+        -:  630:   /* The caller checks for a non-zero buffer length. */
+    #####:  631:   if (!(buffer_length > 0) || buffer == NULL)
+    #####:  632:      png_error(png_ptr, "No IDAT data (internal error)");
+        -:  633:
+        -:  634:   /* This routine must process all the data it has been given
+        -:  635:    * before returning, calling the row callback as required to
+        -:  636:    * handle the uncompressed results.
+        -:  637:    */
+    #####:  638:   png_ptr->zstream.next_in = buffer;
+        -:  639:   /* TODO: WARNING: TRUNCATION ERROR: DANGER WILL ROBINSON: */
+    #####:  640:   png_ptr->zstream.avail_in = (uInt)buffer_length;
+        -:  641:
+        -:  642:   /* Keep going until the decompressed data is all processed
+        -:  643:    * or the stream marked as finished.
+        -:  644:    */
+    #####:  645:   while (png_ptr->zstream.avail_in > 0 &&
+    #####:  646:      (png_ptr->flags & PNG_FLAG_ZSTREAM_ENDED) == 0)
+        -:  647:   {
+        -:  648:      int ret;
+        -:  649:
+        -:  650:      /* We have data for zlib, but we must check that zlib
+        -:  651:       * has someplace to put the results.  It doesn't matter
+        -:  652:       * if we don't expect any results -- it may be the input
+        -:  653:       * data is just the LZ end code.
+        -:  654:       */
+    #####:  655:      if (!(png_ptr->zstream.avail_out > 0))
+        -:  656:      {
+        -:  657:         /* TODO: WARNING: TRUNCATION ERROR: DANGER WILL ROBINSON: */
+    #####:  658:         png_ptr->zstream.avail_out = (uInt)(PNG_ROWBYTES(png_ptr->pixel_depth,
+    #####:  659:             png_ptr->iwidth) + 1);
+        -:  660:
+    #####:  661:         png_ptr->zstream.next_out = png_ptr->row_buf;
+        -:  662:      }
+        -:  663:
+        -:  664:      /* Using Z_SYNC_FLUSH here means that an unterminated
+        -:  665:       * LZ stream (a stream with a missing end code) can still
+        -:  666:       * be handled, otherwise (Z_NO_FLUSH) a future zlib
+        -:  667:       * implementation might defer output and therefore
+        -:  668:       * change the current behavior (see comments in inflate.c
+        -:  669:       * for why this doesn't happen at present with zlib 1.2.5).
+        -:  670:       */
+    #####:  671:      ret = PNG_INFLATE(png_ptr, Z_SYNC_FLUSH);
+        -:  672:
+        -:  673:      /* Check for any failure before proceeding. */
+    #####:  674:      if (ret != Z_OK && ret != Z_STREAM_END)
+        -:  675:      {
+        -:  676:         /* Terminate the decompression. */
+    #####:  677:         png_ptr->flags |= PNG_FLAG_ZSTREAM_ENDED;
+    #####:  678:         png_ptr->zowner = 0;
+        -:  679:
+        -:  680:         /* This may be a truncated stream (missing or
+        -:  681:          * damaged end code).  Treat that as a warning.
+        -:  682:          */
+    #####:  683:         if (png_ptr->row_number >= png_ptr->num_rows ||
+    #####:  684:             png_ptr->pass > 6)
+    #####:  685:            png_warning(png_ptr, "Truncated compressed data in IDAT");
+        -:  686:
+        -:  687:         else
+        -:  688:         {
+    #####:  689:            if (ret == Z_DATA_ERROR)
+    #####:  690:               png_benign_error(png_ptr, "IDAT: ADLER32 checksum mismatch");
+        -:  691:            else
+    #####:  692:               png_error(png_ptr, "Decompression error in IDAT");
+        -:  693:         }
+        -:  694:
+        -:  695:         /* Skip the check on unprocessed input */
+    #####:  696:         return;
+        -:  697:      }
+        -:  698:
+        -:  699:      /* Did inflate output any data? */
+    #####:  700:      if (png_ptr->zstream.next_out != png_ptr->row_buf)
+        -:  701:      {
+        -:  702:         /* Is this unexpected data after the last row?
+        -:  703:          * If it is, artificially terminate the LZ output
+        -:  704:          * here.
+        -:  705:          */
+    #####:  706:         if (png_ptr->row_number >= png_ptr->num_rows ||
+    #####:  707:             png_ptr->pass > 6)
+        -:  708:         {
+        -:  709:            /* Extra data. */
+    #####:  710:            png_warning(png_ptr, "Extra compressed data in IDAT");
+    #####:  711:            png_ptr->flags |= PNG_FLAG_ZSTREAM_ENDED;
+    #####:  712:            png_ptr->zowner = 0;
+        -:  713:
+        -:  714:            /* Do no more processing; skip the unprocessed
+        -:  715:             * input check below.
+        -:  716:             */
+    #####:  717:            return;
+        -:  718:         }
+        -:  719:
+        -:  720:         /* Do we have a complete row? */
+    #####:  721:         if (png_ptr->zstream.avail_out == 0)
+    #####:  722:            png_push_process_row(png_ptr);
+        -:  723:      }
+        -:  724:
+        -:  725:      /* And check for the end of the stream. */
+    #####:  726:      if (ret == Z_STREAM_END)
+    #####:  727:         png_ptr->flags |= PNG_FLAG_ZSTREAM_ENDED;
+        -:  728:   }
+        -:  729:
+        -:  730:   /* All the data should have been processed, if anything
+        -:  731:    * is left at this point we have bytes of IDAT data
+        -:  732:    * after the zlib end code.
+        -:  733:    */
+    #####:  734:   if (png_ptr->zstream.avail_in > 0)
+    #####:  735:      png_warning(png_ptr, "Extra compression data in IDAT");
+        -:  736:}
+        -:  737:
+        -:  738:void /* PRIVATE */
+    #####:  739:png_push_process_row(png_structrp png_ptr)
+        -:  740:{
+        -:  741:   /* 1.5.6: row_info moved out of png_struct to a local here. */
+        -:  742:   png_row_info row_info;
+        -:  743:
+    #####:  744:   row_info.width = png_ptr->iwidth; /* NOTE: width of current interlaced row */
+    #####:  745:   row_info.color_type = png_ptr->color_type;
+    #####:  746:   row_info.bit_depth = png_ptr->bit_depth;
+    #####:  747:   row_info.channels = png_ptr->channels;
+    #####:  748:   row_info.pixel_depth = png_ptr->pixel_depth;
+    #####:  749:   row_info.rowbytes = PNG_ROWBYTES(row_info.pixel_depth, row_info.width);
+        -:  750:
+    #####:  751:   if (png_ptr->row_buf[0] > PNG_FILTER_VALUE_NONE)
+        -:  752:   {
+    #####:  753:      if (png_ptr->row_buf[0] < PNG_FILTER_VALUE_LAST)
+    #####:  754:         png_read_filter_row(png_ptr, &row_info, png_ptr->row_buf + 1,
+    #####:  755:            png_ptr->prev_row + 1, png_ptr->row_buf[0]);
+        -:  756:      else
+    #####:  757:         png_error(png_ptr, "bad adaptive filter value");
+        -:  758:   }
+        -:  759:
+        -:  760:   /* libpng 1.5.6: the following line was copying png_ptr->rowbytes before
+        -:  761:    * 1.5.6, while the buffer really is this big in current versions of libpng
+        -:  762:    * it may not be in the future, so this was changed just to copy the
+        -:  763:    * interlaced row count:
+        -:  764:    */
+    #####:  765:   memcpy(png_ptr->prev_row, png_ptr->row_buf, row_info.rowbytes + 1);
+        -:  766:
+        -:  767:#ifdef PNG_READ_TRANSFORMS_SUPPORTED
+    #####:  768:   if (png_ptr->transformations != 0)
+    #####:  769:      png_do_read_transformations(png_ptr, &row_info);
+        -:  770:#endif
+        -:  771:
+        -:  772:   /* The transformed pixel depth should match the depth now in row_info. */
+    #####:  773:   if (png_ptr->transformed_pixel_depth == 0)
+        -:  774:   {
+    #####:  775:      png_ptr->transformed_pixel_depth = row_info.pixel_depth;
+    #####:  776:      if (row_info.pixel_depth > png_ptr->maximum_pixel_depth)
+    #####:  777:         png_error(png_ptr, "progressive row overflow");
+        -:  778:   }
+        -:  779:
+    #####:  780:   else if (png_ptr->transformed_pixel_depth != row_info.pixel_depth)
+    #####:  781:      png_error(png_ptr, "internal progressive row size calculation error");
+        -:  782:
+        -:  783:
+        -:  784:#ifdef PNG_READ_INTERLACING_SUPPORTED
+        -:  785:   /* Expand interlaced rows to full size */
+    #####:  786:   if (png_ptr->interlaced != 0 &&
+    #####:  787:       (png_ptr->transformations & PNG_INTERLACE) != 0)
+        -:  788:   {
+    #####:  789:      if (png_ptr->pass < 6)
+    #####:  790:         png_do_read_interlace(&row_info, png_ptr->row_buf + 1, png_ptr->pass,
+        -:  791:             png_ptr->transformations);
+        -:  792:
+    #####:  793:      switch (png_ptr->pass)
+        -:  794:      {
+    #####:  795:         case 0:
+        -:  796:         {
+        -:  797:            int i;
+    #####:  798:            for (i = 0; i < 8 && png_ptr->pass == 0; i++)
+        -:  799:            {
+    #####:  800:               png_push_have_row(png_ptr, png_ptr->row_buf + 1);
+    #####:  801:               png_read_push_finish_row(png_ptr); /* Updates png_ptr->pass */
+        -:  802:            }
+        -:  803:
+    #####:  804:            if (png_ptr->pass == 2) /* Pass 1 might be empty */
+        -:  805:            {
+    #####:  806:               for (i = 0; i < 4 && png_ptr->pass == 2; i++)
+        -:  807:               {
+    #####:  808:                  png_push_have_row(png_ptr, NULL);
+    #####:  809:                  png_read_push_finish_row(png_ptr);
+        -:  810:               }
+        -:  811:            }
+        -:  812:
+    #####:  813:            if (png_ptr->pass == 4 && png_ptr->height <= 4)
+        -:  814:            {
+    #####:  815:               for (i = 0; i < 2 && png_ptr->pass == 4; i++)
+        -:  816:               {
+    #####:  817:                  png_push_have_row(png_ptr, NULL);
+    #####:  818:                  png_read_push_finish_row(png_ptr);
+        -:  819:               }
+        -:  820:            }
+        -:  821:
+    #####:  822:            if (png_ptr->pass == 6 && png_ptr->height <= 4)
+        -:  823:            {
+    #####:  824:                png_push_have_row(png_ptr, NULL);
+    #####:  825:                png_read_push_finish_row(png_ptr);
+        -:  826:            }
+        -:  827:
+    #####:  828:            break;
+        -:  829:         }
+        -:  830:
+    #####:  831:         case 1:
+        -:  832:         {
+        -:  833:            int i;
+    #####:  834:            for (i = 0; i < 8 && png_ptr->pass == 1; i++)
+        -:  835:            {
+    #####:  836:               png_push_have_row(png_ptr, png_ptr->row_buf + 1);
+    #####:  837:               png_read_push_finish_row(png_ptr);
+        -:  838:            }
+        -:  839:
+    #####:  840:            if (png_ptr->pass == 2) /* Skip top 4 generated rows */
+        -:  841:            {
+    #####:  842:               for (i = 0; i < 4 && png_ptr->pass == 2; i++)
+        -:  843:               {
+    #####:  844:                  png_push_have_row(png_ptr, NULL);
+    #####:  845:                  png_read_push_finish_row(png_ptr);
+        -:  846:               }
+        -:  847:            }
+        -:  848:
+    #####:  849:            break;
+        -:  850:         }
+        -:  851:
+    #####:  852:         case 2:
+        -:  853:         {
+        -:  854:            int i;
+        -:  855:
+    #####:  856:            for (i = 0; i < 4 && png_ptr->pass == 2; i++)
+        -:  857:            {
+    #####:  858:               png_push_have_row(png_ptr, png_ptr->row_buf + 1);
+    #####:  859:               png_read_push_finish_row(png_ptr);
+        -:  860:            }
+        -:  861:
+    #####:  862:            for (i = 0; i < 4 && png_ptr->pass == 2; i++)
+        -:  863:            {
+    #####:  864:               png_push_have_row(png_ptr, NULL);
+    #####:  865:               png_read_push_finish_row(png_ptr);
+        -:  866:            }
+        -:  867:
+    #####:  868:            if (png_ptr->pass == 4) /* Pass 3 might be empty */
+        -:  869:            {
+    #####:  870:               for (i = 0; i < 2 && png_ptr->pass == 4; i++)
+        -:  871:               {
+    #####:  872:                  png_push_have_row(png_ptr, NULL);
+    #####:  873:                  png_read_push_finish_row(png_ptr);
+        -:  874:               }
+        -:  875:            }
+        -:  876:
+    #####:  877:            break;
+        -:  878:         }
+        -:  879:
+    #####:  880:         case 3:
+        -:  881:         {
+        -:  882:            int i;
+        -:  883:
+    #####:  884:            for (i = 0; i < 4 && png_ptr->pass == 3; i++)
+        -:  885:            {
+    #####:  886:               png_push_have_row(png_ptr, png_ptr->row_buf + 1);
+    #####:  887:               png_read_push_finish_row(png_ptr);
+        -:  888:            }
+        -:  889:
+    #####:  890:            if (png_ptr->pass == 4) /* Skip top two generated rows */
+        -:  891:            {
+    #####:  892:               for (i = 0; i < 2 && png_ptr->pass == 4; i++)
+        -:  893:               {
+    #####:  894:                  png_push_have_row(png_ptr, NULL);
+    #####:  895:                  png_read_push_finish_row(png_ptr);
+        -:  896:               }
+        -:  897:            }
+        -:  898:
+    #####:  899:            break;
+        -:  900:         }
+        -:  901:
+    #####:  902:         case 4:
+        -:  903:         {
+        -:  904:            int i;
+        -:  905:
+    #####:  906:            for (i = 0; i < 2 && png_ptr->pass == 4; i++)
+        -:  907:            {
+    #####:  908:               png_push_have_row(png_ptr, png_ptr->row_buf + 1);
+    #####:  909:               png_read_push_finish_row(png_ptr);
+        -:  910:            }
+        -:  911:
+    #####:  912:            for (i = 0; i < 2 && png_ptr->pass == 4; i++)
+        -:  913:            {
+    #####:  914:               png_push_have_row(png_ptr, NULL);
+    #####:  915:               png_read_push_finish_row(png_ptr);
+        -:  916:            }
+        -:  917:
+    #####:  918:            if (png_ptr->pass == 6) /* Pass 5 might be empty */
+        -:  919:            {
+    #####:  920:               png_push_have_row(png_ptr, NULL);
+    #####:  921:               png_read_push_finish_row(png_ptr);
+        -:  922:            }
+        -:  923:
+    #####:  924:            break;
+        -:  925:         }
+        -:  926:
+    #####:  927:         case 5:
+        -:  928:         {
+        -:  929:            int i;
+        -:  930:
+    #####:  931:            for (i = 0; i < 2 && png_ptr->pass == 5; i++)
+        -:  932:            {
+    #####:  933:               png_push_have_row(png_ptr, png_ptr->row_buf + 1);
+    #####:  934:               png_read_push_finish_row(png_ptr);
+        -:  935:            }
+        -:  936:
+    #####:  937:            if (png_ptr->pass == 6) /* Skip top generated row */
+        -:  938:            {
+    #####:  939:               png_push_have_row(png_ptr, NULL);
+    #####:  940:               png_read_push_finish_row(png_ptr);
+        -:  941:            }
+        -:  942:
+    #####:  943:            break;
+        -:  944:         }
+        -:  945:
+    #####:  946:         default:
+        -:  947:         case 6:
+        -:  948:         {
+    #####:  949:            png_push_have_row(png_ptr, png_ptr->row_buf + 1);
+    #####:  950:            png_read_push_finish_row(png_ptr);
+        -:  951:
+    #####:  952:            if (png_ptr->pass != 6)
+    #####:  953:               break;
+        -:  954:
+    #####:  955:            png_push_have_row(png_ptr, NULL);
+    #####:  956:            png_read_push_finish_row(png_ptr);
+        -:  957:         }
+        -:  958:      }
+        -:  959:   }
+        -:  960:   else
+        -:  961:#endif
+        -:  962:   {
+    #####:  963:      png_push_have_row(png_ptr, png_ptr->row_buf + 1);
+    #####:  964:      png_read_push_finish_row(png_ptr);
+        -:  965:   }
+    #####:  966:}
+        -:  967:
+        -:  968:void /* PRIVATE */
+    #####:  969:png_read_push_finish_row(png_structrp png_ptr)
+        -:  970:{
+        -:  971:#ifdef PNG_READ_INTERLACING_SUPPORTED
+        -:  972:   /* Arrays to facilitate easy interlacing - use pass (0 - 6) as index */
+        -:  973:
+        -:  974:   /* Start of interlace block */
+        -:  975:   static PNG_CONST png_byte png_pass_start[] = {0, 4, 0, 2, 0, 1, 0};
+        -:  976:
+        -:  977:   /* Offset to next interlace block */
+        -:  978:   static PNG_CONST png_byte png_pass_inc[] = {8, 8, 4, 4, 2, 2, 1};
+        -:  979:
+        -:  980:   /* Start of interlace block in the y direction */
+        -:  981:   static PNG_CONST png_byte png_pass_ystart[] = {0, 0, 4, 0, 2, 0, 1};
+        -:  982:
+        -:  983:   /* Offset to next interlace block in the y direction */
+        -:  984:   static PNG_CONST png_byte png_pass_yinc[] = {8, 8, 8, 4, 4, 2, 2};
+        -:  985:
+        -:  986:   /* Height of interlace block.  This is not currently used - if you need
+        -:  987:    * it, uncomment it here and in png.h
+        -:  988:   static PNG_CONST png_byte png_pass_height[] = {8, 8, 4, 4, 2, 2, 1};
+        -:  989:   */
+        -:  990:#endif
+        -:  991:
+    #####:  992:   png_ptr->row_number++;
+    #####:  993:   if (png_ptr->row_number < png_ptr->num_rows)
+    #####:  994:      return;
+        -:  995:
+        -:  996:#ifdef PNG_READ_INTERLACING_SUPPORTED
+    #####:  997:   if (png_ptr->interlaced != 0)
+        -:  998:   {
+    #####:  999:      png_ptr->row_number = 0;
+    #####: 1000:      memset(png_ptr->prev_row, 0, png_ptr->rowbytes + 1);
+        -: 1001:
+        -: 1002:      do
+        -: 1003:      {
+    #####: 1004:         png_ptr->pass++;
+    #####: 1005:         if ((png_ptr->pass == 1 && png_ptr->width < 5) ||
+    #####: 1006:             (png_ptr->pass == 3 && png_ptr->width < 3) ||
+    #####: 1007:             (png_ptr->pass == 5 && png_ptr->width < 2))
+    #####: 1008:            png_ptr->pass++;
+        -: 1009:
+    #####: 1010:         if (png_ptr->pass > 7)
+    #####: 1011:            png_ptr->pass--;
+        -: 1012:
+    #####: 1013:         if (png_ptr->pass >= 7)
+    #####: 1014:            break;
+        -: 1015:
+    #####: 1016:         png_ptr->iwidth = (png_ptr->width +
+    #####: 1017:             png_pass_inc[png_ptr->pass] - 1 -
+    #####: 1018:             png_pass_start[png_ptr->pass]) /
+    #####: 1019:             png_pass_inc[png_ptr->pass];
+        -: 1020:
+    #####: 1021:         if ((png_ptr->transformations & PNG_INTERLACE) != 0)
+    #####: 1022:            break;
+        -: 1023:
+    #####: 1024:         png_ptr->num_rows = (png_ptr->height +
+    #####: 1025:             png_pass_yinc[png_ptr->pass] - 1 -
+    #####: 1026:             png_pass_ystart[png_ptr->pass]) /
+    #####: 1027:             png_pass_yinc[png_ptr->pass];
+        -: 1028:
+    #####: 1029:      } while (png_ptr->iwidth == 0 || png_ptr->num_rows == 0);
+        -: 1030:   }
+        -: 1031:#endif /* READ_INTERLACING */
+        -: 1032:}
+        -: 1033:
+        -: 1034:void /* PRIVATE */
+    #####: 1035:png_push_have_info(png_structrp png_ptr, png_inforp info_ptr)
+        -: 1036:{
+    #####: 1037:   if (png_ptr->info_fn != NULL)
+    #####: 1038:      (*(png_ptr->info_fn))(png_ptr, info_ptr);
+    #####: 1039:}
+        -: 1040:
+        -: 1041:void /* PRIVATE */
+    #####: 1042:png_push_have_end(png_structrp png_ptr, png_inforp info_ptr)
+        -: 1043:{
+    #####: 1044:   if (png_ptr->end_fn != NULL)
+    #####: 1045:      (*(png_ptr->end_fn))(png_ptr, info_ptr);
+    #####: 1046:}
+        -: 1047:
+        -: 1048:void /* PRIVATE */
+    #####: 1049:png_push_have_row(png_structrp png_ptr, png_bytep row)
+        -: 1050:{
+    #####: 1051:   if (png_ptr->row_fn != NULL)
+    #####: 1052:      (*(png_ptr->row_fn))(png_ptr, row, png_ptr->row_number,
+    #####: 1053:          (int)png_ptr->pass);
+    #####: 1054:}
+        -: 1055:
+        -: 1056:#ifdef PNG_READ_INTERLACING_SUPPORTED
+        -: 1057:void PNGAPI
+    #####: 1058:png_progressive_combine_row(png_const_structrp png_ptr, png_bytep old_row,
+        -: 1059:    png_const_bytep new_row)
+        -: 1060:{
+    #####: 1061:   if (png_ptr == NULL)
+    #####: 1062:      return;
+        -: 1063:
+        -: 1064:   /* new_row is a flag here - if it is NULL then the app callback was called
+        -: 1065:    * from an empty row (see the calls to png_struct::row_fn below), otherwise
+        -: 1066:    * it must be png_ptr->row_buf+1
+        -: 1067:    */
+    #####: 1068:   if (new_row != NULL)
+    #####: 1069:      png_combine_row(png_ptr, old_row, 1/*blocky display*/);
+        -: 1070:}
+        -: 1071:#endif /* READ_INTERLACING */
+        -: 1072:
+        -: 1073:void PNGAPI
+    #####: 1074:png_set_progressive_read_fn(png_structrp png_ptr, png_voidp progressive_ptr,
+        -: 1075:    png_progressive_info_ptr info_fn, png_progressive_row_ptr row_fn,
+        -: 1076:    png_progressive_end_ptr end_fn)
+        -: 1077:{
+    #####: 1078:   if (png_ptr == NULL)
+    #####: 1079:      return;
+        -: 1080:
+    #####: 1081:   png_ptr->info_fn = info_fn;
+    #####: 1082:   png_ptr->row_fn = row_fn;
+    #####: 1083:   png_ptr->end_fn = end_fn;
+        -: 1084:
+    #####: 1085:   png_set_read_fn(png_ptr, progressive_ptr, png_push_fill_buffer);
+        -: 1086:}
+        -: 1087:
+        -: 1088:png_voidp PNGAPI
+    #####: 1089:png_get_progressive_ptr(png_const_structrp png_ptr)
+        -: 1090:{
+    #####: 1091:   if (png_ptr == NULL)
+    #####: 1092:      return (NULL);
+        -: 1093:
+    #####: 1094:   return png_ptr->io_ptr;
+        -: 1095:}
+        -: 1096:#endif /* PROGRESSIVE_READ */
